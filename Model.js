@@ -96,6 +96,33 @@ function clampFlat(value) {
   return Math.max(0, Math.min(5, Math.round(n * 10) / 10))
 }
 
+// Bar section is host layout, not an inline setting: which of
+// bar.layout.{left,center,right} this widget's entry lives in.
+function clampSection(value) {
+  var s = String(value === null || value === undefined ? "" : value).replace(/^\s+|\s+$/g, "").toLowerCase()
+  if (s === "left" || s === "center" || s === "right") return s
+  return ""
+}
+
+// Which bar section holds `id`. layout arrays arrive as QVariantList, so
+// duck-type length the same way coinList does.
+function barSectionOf(layout, id) {
+  if (!layout || typeof layout !== "object") return ""
+  var key = String(id || "")
+  if (key === "") return ""
+  var sections = ["left", "center", "right"]
+  for (var s = 0; s < sections.length; s++) {
+    var arr = layout[sections[s]]
+    var n = arr && typeof arr.length === "number" ? arr.length : 0
+    for (var i = 0; i < n; i++) {
+      var entry = arr[i]
+      var eid = (entry && typeof entry === "object") ? String(entry.id || "") : String(entry || "")
+      if (eid === key) return sections[s]
+    }
+  }
+  return ""
+}
+
 function ladderCount() {
   return INTERVAL_LADDER.length
 }
@@ -408,6 +435,15 @@ function pollPublish(widget, rows, updatedMs, error, ok) {
 
 function pollConsume(widget) {
   if (pollState.leader === widget) return null
+  return pollSnapshot()
+}
+
+// Last published markets, regardless of who the leader is. A widget
+// rebuilt by a bar-layout move becomes the new leader with empty
+// marketRows; it must still be able to take the previous publish so
+// the bar does not go blank while the rate-limit gate defers a fetch.
+function pollSnapshot() {
+  if (pollState.seq === 0) return null
   return { rows: pollState.rows, updated: pollState.updated, error: pollState.error, seq: pollState.seq }
 }
 

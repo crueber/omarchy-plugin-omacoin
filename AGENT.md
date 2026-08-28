@@ -2,7 +2,7 @@
 
 Crypto price tracker plugin (id `crueber.omacoin`) for the Omarchy shell.
 Fetches from CoinGecko's public API via `curl` (Quickshell `Process`), no API key.
-Current version **1.6.0** — security-hardening pass addressing the marketplace review feedback (see `History`), deployed and under re-review.
+Current version **1.7.0** — Settings tab can move the widget between bar sections (left / center / right) via `pluginRegistry.moveBarWidget`. After a move the new instance hydrates from `pollSnapshot()` so last prices stay on the bar while the CoinGecko gate defers a refetch.
 
 ## Layout
 
@@ -37,7 +37,7 @@ Current version **1.6.0** — security-hardening pass addressing the marketplace
 - **Restart required:** `omarchy restart shell` after deploying widget QML — hot reload ("Local plugin changed, reloading") replaces bar-widget components unreliably and caused several phantom bugs during debugging (stale panels, dead widgets). Always verify on a fresh restart; hot-reload artifacts vanish.
 - **Never git-clone into the live plugin dir while the shell runs** — triggers a quickshell SIGSEGV reload race. Deploy with `cp`, or stop the shell first.
 - Live state to check when things look wrong: `~/.config/omarchy/shell.json` (the widget's entry: coins/primary/intervalMin/flatThresholdPct), `journalctl --user --since "-X min" | grep -iE "crueber|omacoin"`, quickshell's own log in `/run/user/1000/quickshell/by-id/<id>/log.qslog` (binary-framed; use `strings`).
-- IPC: `quickshell ipc -p /usr/share/omarchy/shell call crueber.omacoin <method> <arg>` — methods: open/close/show/hide/toggle/refresh/addCoin/removeCoin/setPrimary/setIntervalMin/setFlatThreshold. Note `omarchy-shell shell call` only routes to panel-kind plugins; bar widgets need the quickshell path or `omarchy-shell shell summon crueber.omacoin '{}'`.
+- IPC: `quickshell ipc -p /usr/share/omarchy/shell call crueber.omacoin <method> <arg>` — methods: open/close/show/hide/toggle/refresh/addCoin/removeCoin/setPrimary/setIntervalMin/setFlatThreshold/setBarSection. Note `omarchy-shell shell call` only routes to panel-kind plugins; bar widgets need the quickshell path or `omarchy-shell shell summon crueber.omacoin '{}'`.
 - Verification without input synthesis (no ydotool/wtype on this box): IPC calls + `grim` screenshots + `tesseract` OCR + pixel sampling via `magick ... txt:-`. Tesseract mis-reads terminal text near the panel — always crop to the panel region (roughly x 890–1660, y 30–930 on this 1920×1080 single-monitor setup) before OCR.
 - CoinGecko timing: rate limit is ~1 call/min. When testing fetch behavior, watch for real `curl` processes with `pgrep -x curl` (NOT `pgrep -f` — it matches your own watcher's command line).
 
@@ -45,6 +45,7 @@ Current version **1.6.0** — security-hardening pass addressing the marketplace
 
 `ea875ed` initial · `c0a4814` drop %, tint price · `0730c51` direction glyph · `57c8423` flat band + sliders + tabs + review-1 fixes · `4de3c10` refresh button + cooldown · `1cf62d7` review-2 fixes (gate choke point, seq fan-out) · `c92040c` review-3 (defer gate-blocked, chartGen) · `2d16563` review-3 polish (drain-guard, dedupe queue) · `5f75ea7` marketplace prep · `77554cf`/`b0bc450` preview image · `26da763` search delegate fix · `366399b` QVariantList + snapshot writes + re-inject host · `2bd16b6` restore lost `close()` · `ac61621` AGENT.md handoff · `4cbe0e7` review-4 (normalize removeCoin input, intervalIndex fallback rung).
  · `1.6.0` marketplace review fixes (coin-id charset/length rules + COINS_MAX cap, producer-side 1MiB response cap via bash pipefail+head -c on all three fetches, parser-side bounds, safeString sanitization, Text.PlainText remote strings, normalized IPC setPrimary).
+ · `1.7.0` Settings bar-position chips (left/center/right) calling `pluginRegistry.moveBarWidget`; IPC `setBarSection`; hydrate last prices after the host rebuilds the widget.
 
 Four Ox Alpha reviews (via `opencode run -m opencode-go/ox-alpha-free` from the repo dir; OpenRouter's `stealth/ox-alpha` is blocked by the account's data policy — use the opencode-go endpoint). Round 3 verdict: **shippable**.
 

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "crueber.omacoin",
   "name": "OmaCoin",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "author": "crueber",
   "license": "MIT",
   "description": "CoinGecko crypto tracker: primary coin price in the bar, popup with tracked coins, USD price, volume, and 1h/1d/1w trend lines.",

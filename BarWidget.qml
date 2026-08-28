@@ -7,11 +7,12 @@ import "Model.js" as Model
 // OmaCoin bar widget: the primary coin's USD price and a direction glyph.
 //
 // Left click opens the panel (coins tab: tracked list, trends, add/remove;
-// settings tab: check frequency and flat-band sliders), middle click cycles
-// the primary through the tracked coins, right click forces a refresh. All
-// user state lives inline on this widget's shell.json entry (coins /
-// primary / intervalMin / flatThresholdPct), written through
-// bar.shell.updateEntryInline so every bar instance stays in sync.
+// settings tab: bar position, check frequency, and flat-band sliders),
+// middle click cycles the primary through the tracked coins, right click
+// forces a refresh. Coin state lives inline on this widget's shell.json
+// entry (coins / primary / intervalMin / flatThresholdPct), written
+// through bar.shell.updateEntryInline. Bar section is host layout
+// (left/center/right), moved via pluginRegistry.moveBarWidget.
 //
 // Polling: a bar surface exists per monitor, so several instances of this
 // widget can be alive at once. Exactly one — the "leader", elected through
@@ -46,6 +47,9 @@ BarWidget {
   property string primary: "bitcoin"
   property int intervalMin: 60
   property real flatThresholdPct: Model.FLAT_DEFAULT
+  // Which bar.layout section this entry currently occupies. Not an
+  // inline setting — the host stores it as which array the entry is in.
+  property string barSection: ""
 
   // True while this instance owns the module's single poll loop.
   property bool pollLeader: false
@@ -65,13 +69,56 @@ BarWidget {
     if (prim !== primary) primary = prim
     if (iv !== intervalMin) intervalMin = iv
     if (flat !== flatThresholdPct) flatThresholdPct = flat
+    refreshBarSection()
   }
+
+  function currentBarSection() {
+    var layout = root.bar && root.bar.barConfig ? root.bar.barConfig.layout : null
+    return Model.barSectionOf(layout, root.moduleName)
+  }
+
+  function refreshBarSection() {
+    var next = currentBarSection()
+    if (next !== barSection) barSection = next
+  }
+
+  // Take the last published markets. Needed after a layout move: the
+  // host destroys this widget and builds a new one that wins leadership
+  // immediately, so the follower consume path never runs, and the
+  // rate-limit gate would otherwise leave the bar blank for up to 60s.
+  function hydrateFromPoll() {
+    var shared = Model.pollSnapshot()
+    if (!shared || shared.seq <= root.consumedSeq) return false
+    root.consumedSeq = shared.seq
+    root.marketRows = shared.rows
+    root.lastUpdated = shared.updated ? new Date(shared.updated) : new Date(0)
+    root.fetchError = shared.error || ""
+    root.initialFetch = false
+    return true
+  }
+
+  // Relocate this widget between bar.layout left/center/right. The host
+  // rewrite destroys the live widget, so the panel is closed first and
+  // the move is deferred one tick.
+  function setBarSection(section) {
+    var next = Model.clampSection(section)
+    if (next === "") return
+    if (next === currentBarSection()) return
+    var registry = root.bar && root.bar.shell && root.bar.shell.pluginRegistry
+    if (!registry || typeof registry.moveBarWidget !== "function") return
+    root.close()
+    Qt.callLater(function() {
+      registry.moveBarWidget(root.moduleName, { section: next })
+    })
+  }
+
   // Suppress the tracked-coins refetch during startup: the poll timer's
   // triggeredOnStart already fetches, so a changed list would only queue
   // a redundant second call.
   property bool startupDone: false
   Component.onCompleted: {
     applySettings()
+    hydrateFromPoll()
     startupDone = true
   }
   Component.onDestruction: Model.pollRelease(root)
@@ -246,11 +293,12 @@ BarWidget {
   // ---- poll coordination ---------------------------------------------
   //
   // Leadership heartbeat + result fan-out. The leader claims once and then
-  // only re-beats; everyone else consumes published state whenever the
-  // publish sequence moved (successes AND failures — a failed check keeps
-  // the old timestamp, so comparing timestamps would hide errors from
-  // secondary monitors). A dead leader (widget destroyed with the monitor
-  // it lived on) stops beating and is replaced within the 20s window.
+  // only re-beats; everyone hydrates from the last publish whenever seq
+  // moved (successes AND failures — a failed check keeps the old
+  // timestamp, so comparing timestamps would hide errors from secondary
+  // monitors). A dead leader (widget destroyed with the monitor it lived
+  // on, or rebuilt by a bar-section move) is replaced within the 20s
+  // window; the new instance hydrates so the bar keeps last prices.
   property int consumedSeq: 0
   Timer {
     id: pollCoordination
@@ -259,17 +307,12 @@ BarWidget {
     running: true
     triggeredOnStart: true
     onTriggered: {
-      var wasLeader = root.pollLeader
       root.pollLeader = Model.pollClaim(root, Date.now())
-      if (root.pollLeader || wasLeader) return
-      var shared = Model.pollConsume(root)
-      if (shared && shared.seq > root.consumedSeq) {
-        root.consumedSeq = shared.seq
-        root.marketRows = shared.rows
-        root.lastUpdated = new Date(shared.updated)
-        root.fetchError = shared.error
-        root.initialFetch = false
-      }
+      // Leaders used to skip consume because they were the publisher. A
+      // freshly-elected leader after a widget recreate has empty rows and
+      // must still take the last publish. hydrateFromPoll is a no-op when
+      // seq has not moved, so a live leader does not clobber itself.
+      hydrateFromPoll()
     }
   }
 
@@ -461,6 +504,7 @@ BarWidget {
     function setPrimary(id: string): void { root.updateSetting("primary", Model.primaryId(root.trackedCoins, id)) }
     function setIntervalMin(minutes: int): void { root.updateSetting("intervalMin", Model.clampInterval(minutes)) }
     function setFlatThreshold(pct: real): void { root.updateSetting("flatThresholdPct", Model.clampFlat(pct)) }
+    function setBarSection(section: string): void { root.setBarSection(section) }
   }
 
   Row {

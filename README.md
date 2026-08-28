@@ -18,7 +18,21 @@ the [CoinGecko](https://www.coingecko.com/) public API.
     volume, and 1h/24h/7d change for each coin), and CoinGecko search to add
     any coin by name or symbol. Click a coin (or its ★) to make it the
     primary shown in the bar; ✕ removes a coin.
-  - **Settings** — the check-frequency slider and the flat-band slider.
+  - **Settings** — bar position (left / center / right), the
+    check-frequency slider, and the flat-band slider.
+
+## Bar position
+
+Enable asks **left / center / right** once. After that, change it from the
+popup's **Settings** tab — the same three chips — without re-enabling or
+editing `shell.json`. The host still owns the layout, so this is a move of
+the existing entry (settings stay intact), not a new widget.
+
+From a script:
+
+```bash
+omarchy bar move crueber.omacoin --section right
+```
 
 ## Check frequency
 
@@ -60,6 +74,10 @@ Everything lives inline on the widget's entry in `~/.config/omarchy/shell.json`:
 - `intervalMin` — check frequency in minutes, snapped to the ladder
   (default: `60`)
 - `flatThresholdPct` — flat band in percent (default: `0.5`)
+
+Bar section is **not** an inline key — it is which of `bar.layout.left`,
+`center`, or `right` the entry lives in. The Settings chips call the
+shell's widget-move API so that placement stays in the host layout.
 
 All of it is editable from the popup, so you never have to touch the file.
 

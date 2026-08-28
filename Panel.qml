@@ -11,8 +11,9 @@ import "Model.js" as Model
 //   COINS    primary-coin hero with a 1h/1d/1w trend line, the tracked-coin
 //            list (price, volume, 1h/24h/7d change, make-primary and remove
 //            actions), and CoinGecko search for adding coins
-//   SETTINGS check-frequency slider (1 minute → 1 day over CoinGecko's
-//            ladder) and the flat-band slider (0–5%, 0.1% steps)
+//   SETTINGS bar position (left / center / right), check-frequency slider
+//            (1 minute → 1 day over CoinGecko's ladder), and the
+//            flat-band slider (0–5%, 0.1% steps)
 //
 // All mutations go through the host BarWidget so they land in the widget's
 // shell.json entry and every bar instance syncs.
@@ -63,6 +64,7 @@ Panel {
   property string primary: ""
   property int intervalMin: 60
   property real flatThresholdPct: Model.FLAT_DEFAULT
+  property string barSection: ""
   property date lastUpdated: new Date(0)
   property string fetchError: ""
 
@@ -76,6 +78,8 @@ Panel {
     flatThresholdPct = hostWidget.flatThresholdPct
     lastUpdated = hostWidget.lastUpdated
     fetchError = hostWidget.fetchError
+    if (typeof hostWidget.refreshBarSection === "function") hostWidget.refreshBarSection()
+    barSection = hostWidget.barSection || ""
   }
 
   onHostWidgetChanged: syncFromHost()
@@ -226,6 +230,14 @@ Panel {
     if (hostWidget && typeof hostWidget.updateSetting === "function")
       hostWidget.updateSetting("flatThresholdPct", flatThresholdPct)
     Qt.callLater(syncFromHost)
+  }
+
+  function setBarSection(section) {
+    var next = Model.clampSection(section)
+    if (next === "") return
+    barSection = next
+    if (hostWidget && typeof hostWidget.setBarSection === "function")
+      hostWidget.setBarSection(next)
   }
 
   // Chart-fetch generation: incremented on every refreshCharts(), so a
@@ -888,6 +900,46 @@ Panel {
             visible: root.activeTab === "settings"
             width: parent.width
             spacing: Style.space(14)
+
+            // ------------------------------------------- bar position
+            PanelSectionHeader {
+              text: "BAR POSITION"
+              foreground: root.bar ? root.bar.foreground : Color.foreground
+            }
+
+            Row {
+              spacing: Style.space(6)
+
+              Repeater {
+                model: [
+                  { key: "left", label: "LEFT" },
+                  { key: "center", label: "CENTER" },
+                  { key: "right", label: "RIGHT" }
+                ]
+
+                Button {
+                  required property var modelData
+                  text: modelData.label
+                  selected: root.barSection === modelData.key
+                  foreground: root.bar ? root.bar.foreground : Color.foreground
+                  fontSize: Style.font.bodySmall
+                  horizontalPadding: Style.spacing.md
+                  verticalPadding: Style.spacing.xxs
+                  onClicked: root.setBarSection(modelData.key)
+                }
+              }
+            }
+
+            Text {
+              width: parent.width
+              text: "Which bar section this widget sits in — the same left / center / right choice as when the plugin was enabled."
+              color: Qt.darker(root.bar ? root.bar.foreground : Color.foreground, 1.6)
+              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+            }
+
+            PanelSeparator { foreground: root.bar ? root.bar.foreground : Color.foreground }
 
             // ------------------------------------------- check frequency
             PanelSectionHeader {
