@@ -60,6 +60,7 @@ Everything lives inline on the widget's entry in `~/.config/omarchy/shell.json`:
 - `intervalMin` — check frequency in minutes, snapped to the ladder
   (default: `60`)
 - `flatThresholdPct` — flat band in percent (default: `0.5`)
+- `popupPosition` — `icon` (opens under the bar icon, default) or `center`
 
 All of it is editable from the popup, so you never have to touch the file.
 
