@@ -337,7 +337,7 @@ Panel {
     owner: root.barIdentity
     bar: root.bar
     open: root.opened
-    centerOnBar: String(root.setting("popupPosition", "icon")) === "center"
+    centerOnBar: String((root.settings && root.settings.popupPosition) || "icon") === "center"
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(480))
     contentHeight: panel.fittedContentHeight(column.implicitHeight)
