@@ -2,7 +2,7 @@
 
 Crypto price tracker plugin (id `crueber.omacoin`) for the Omarchy shell.
 Fetches from CoinGecko's public API via `curl` (Quickshell `Process`), no API key.
-Current version **1.6.0** — security-hardening pass addressing the marketplace review feedback (see `History`), deployed and under re-review.
+Current version **1.6.1** — popup opens under the bar icon by default (`popupPosition` opts back into centering).
 
 ## Layout
 
@@ -45,6 +45,7 @@ Current version **1.6.0** — security-hardening pass addressing the marketplace
 
 `ea875ed` initial · `c0a4814` drop %, tint price · `0730c51` direction glyph · `57c8423` flat band + sliders + tabs + review-1 fixes · `4de3c10` refresh button + cooldown · `1cf62d7` review-2 fixes (gate choke point, seq fan-out) · `c92040c` review-3 (defer gate-blocked, chartGen) · `2d16563` review-3 polish (drain-guard, dedupe queue) · `5f75ea7` marketplace prep · `77554cf`/`b0bc450` preview image · `26da763` search delegate fix · `366399b` QVariantList + snapshot writes + re-inject host · `2bd16b6` restore lost `close()` · `ac61621` AGENT.md handoff · `4cbe0e7` review-4 (normalize removeCoin input, intervalIndex fallback rung).
  · `1.6.0` marketplace review fixes (coin-id charset/length rules + COINS_MAX cap, producer-side 1MiB response cap via bash pipefail+head -c on all three fetches, parser-side bounds, safeString sanitization, Text.PlainText remote strings, normalized IPC setPrimary).
+ · `1.6.1` popup opens under the bar icon by default (`popupPosition` to center).
 
 Four Ox Alpha reviews (via `opencode run -m opencode-go/ox-alpha-free` from the repo dir; OpenRouter's `stealth/ox-alpha` is blocked by the account's data policy — use the opencode-go endpoint). Round 3 verdict: **shippable**.
 
