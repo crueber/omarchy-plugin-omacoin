@@ -415,6 +415,58 @@ function pollLeaderInstance() {
   return pollState.leader
 }
 
+// ------------------------------------------------------------ local cache
+//
+// A shell restart or plugin reload creates a fresh QML engine, so the
+// in-memory pollState above starts empty. Without a disk cache the newly
+// created leader immediately calls CoinGecko again even when the last check
+// is seconds old. The cache keeps the last successful raw response and its
+// fetch time, so a fresh start can paint prices and wait out the rest of the
+// configured interval instead of polling again.
+var CACHE_VERSION = 1
+var CACHE_MAX_AGE_MS = 31 * 24 * 60 * 60 * 1000
+
+// Parse and validate a cache document written by serializeCache(). The body
+// is re-run through parseMarkets(), so a hand-edited cache gets the same
+// bounds and sanitizing as a live response.
+function parseCache(raw, nowMs) {
+  var text = String(raw || "")
+  // A cache file is another untrusted input: bound it before JSON.parse so a
+  // hand-edited or corrupted file cannot balloon memory.
+  if (text.length > RESPONSE_MAX_BYTES + 4096) return null
+  var data = parseJson(text)
+  if (!data || typeof data !== "object" || data.v !== CACHE_VERSION) return null
+  var fetchedAt = Number(data.fetchedAt)
+  var now = Number(nowMs)
+  if (!isFinite(fetchedAt) || fetchedAt <= 0) return null
+  // Reject timestamps far in the future (clock changes) and caches old
+  // enough that showing them would be misleading. The scheduled poll still
+  // runs normally when a cache is rejected.
+  if (isFinite(now) && (fetchedAt > now + 300000 || now - fetchedAt > CACHE_MAX_AGE_MS)) return null
+  var body = data.body
+  if (typeof body !== "string" || body.length === 0) return null
+  if (body.length > RESPONSE_MAX_BYTES) body = body.slice(0, RESPONSE_MAX_BYTES)
+  var map = parseMarkets(body)
+  if (!map || Object.keys(map).length === 0) return null
+  return { fetchedAt: isFinite(now) ? Math.min(fetchedAt, now) : fetchedAt, map: map }
+}
+
+function serializeCache(body, fetchedAtMs) {
+  return JSON.stringify({
+    v: CACHE_VERSION,
+    fetchedAt: Math.round(Number(fetchedAtMs) || 0),
+    body: String(body || "")
+  })
+}
+
+// Seed the shared poll gate from a cache hit so a manual refresh observes
+// the same one-minute CoinGecko cooldown across a shell restart.
+function seedPollCache(successMs) {
+  var ms = Number(successMs)
+  if (!isFinite(ms) || ms <= 0) return
+  if (ms > pollState.lastSuccessMs) pollState.lastSuccessMs = ms
+}
+
 // ------------------------------------------------------------- retries
 
 // Escalating backoff between failed checks: hammering an already

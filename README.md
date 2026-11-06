@@ -30,6 +30,18 @@ minutes, 1 day**. Default: **once per hour**. Each check is a single
 costs no extra calls — and exactly one poll loop runs no matter how many
 monitors show the widget.
 
+## Local cache
+
+The last successful response is cached at
+`${XDG_CACHE_HOME:-~/.cache}/omacoin/markets.json`. A shell restart or plugin
+reload paints the cached price immediately, and when the cache is younger
+than the configured check frequency it waits out the remaining time instead
+of calling CoinGecko again — so repeatedly reloading the shell does not burn
+through the API's rate limit. A cache older than the interval, or one that
+does not yet cover a newly added coin, triggers a normal check. The cache is
+rewritten atomically after each successful check and ignored if it is
+malformed or more than 31 days old.
+
 ## Flat band
 
 24h moves smaller than the flat band count as "no direction": the bar shows
@@ -52,7 +64,8 @@ The plugin treats its two untrusted inputs accordingly:
 
 ## State
 
-Everything lives inline on the widget's entry in `~/.config/omarchy/shell.json`:
+Your settings live inline on the widget's entry in
+`~/.config/omarchy/shell.json`:
 
 - `coins` — tracked CoinGecko ids (default: `["bitcoin", "ethereum"]`;
   capped at 16, ids restricted to CoinGecko's lowercase id format)
@@ -93,9 +106,9 @@ omarchy plugin remove crueber.omacoin
 or by hand: remove the widget from your bar layout in
 `~/.config/omarchy/shell.json`, delete
 `~/.config/omarchy/plugins/crueber.omacoin`, and restart the shell
-(`omarchy restart shell`). All plugin state lives inline on the widget's
-entry in `~/.config/omarchy/shell.json` — removing the entry removes every
-trace; no other files are written.
+(`omarchy restart shell`). Widget settings live inline in
+`~/.config/omarchy/shell.json`; the price cache lives in
+`${XDG_CACHE_HOME:-~/.cache}/omacoin/` and can be deleted too.
 
 ## Dependencies
 

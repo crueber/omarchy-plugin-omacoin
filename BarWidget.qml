@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
@@ -34,8 +35,26 @@ BarWidget {
   property bool fetchQueued: false
   // True from first launch until the first check finishes (success or
   // failure): the bar shows its "—" placeholder during the fetch so the
-  // slot does not pop in with a layout shift 15s later.
+  // slot does not pop in with a layout shift 15s later. A cache hit clears
+  // it immediately; an empty/partial cache keeps it set until the check.
   property bool initialFetch: true
+
+  // Latest successful market map and when it was fetched. `lastMap` lets a
+  // tracked-coin change reorder existing rows without a network call;
+  // `cacheFetchedAt` is the disk cache's timestamp until a live check wins.
+  property var lastMap: null
+  property double cacheFetchedAt: 0
+  property bool cacheLoadAttempted: false
+  property bool settingsReady: false
+
+  readonly property string cacheHome: {
+    var xdg = Quickshell.env("XDG_CACHE_HOME")
+    if (xdg) return xdg
+    var home = Quickshell.env("HOME")
+    return home ? home + "/.cache" : "/tmp"
+  }
+  readonly property string cacheDir: root.cacheHome + "/omacoin"
+  readonly property string cachePath: root.cacheDir + "/markets.json"
 
   // Settings-derived state. QML's dependency tracking does not reliably
   // follow `settings` reads made inside the base class's setting() helper
@@ -61,23 +80,106 @@ BarWidget {
     // Compare before assigning: a fresh array's identity alone would notify
     // onTrackedCoinsChanged (and trigger a refetch) on every settings write
     // even when the list did not change.
-    if (JSON.stringify(coins) !== JSON.stringify(trackedCoins)) trackedCoins = coins
-    if (prim !== primary) primary = prim
+    var coinsChanged = JSON.stringify(coins) !== JSON.stringify(trackedCoins)
+    // Reorder before publishing the new list so the change handler sees the
+    // already-filtered rows. A removed coin disappears immediately; a new
+    // one stays missing until the check that follows.
+    if (coinsChanged) {
+      if (root.lastMap) root.marketRows = Model.orderRows(root.lastMap, coins)
+      trackedCoins = coins
+    }
+    var primaryChanged = prim !== primary
+    if (primaryChanged) primary = prim
     if (iv !== intervalMin) intervalMin = iv
     if (flat !== flatThresholdPct) flatThresholdPct = flat
+    if (coinsChanged || primaryChanged) {
+      // Keep the slot visible while the primary coin has no cached row yet
+      // (new coin, partial cache, delisted id) so the placeholder and its
+      // click target do not disappear during the check.
+      if (root.primaryRow) root.initialFetch = false
+      else if (root.fetchError === "") root.initialFetch = true
+    }
   }
   // Suppress the tracked-coins refetch during startup: the poll timer's
-  // triggeredOnStart already fetches, so a changed list would only queue
-  // a redundant second call.
+  // first scheduled check already fetches, so a changed list would only
+  // queue a redundant second call.
   property bool startupDone: false
   Component.onCompleted: {
     applySettings()
+    root.loadCache(cacheFile.loaded ? cacheFile.text() : "")
+    root.cacheLoadAttempted = true
     startupDone = true
+    // The bar host injects `settings` after the widget is constructed (via
+    // the Loader's injectProps), so wait one event-loop turn before letting
+    // the leader choose a check time. Otherwise the first fetch could use
+    // the default coin list instead of the user's.
+    Qt.callLater(function() {
+      root.settingsReady = true
+      if (root.pollLeader) root.startPolling()
+    })
   }
   Component.onDestruction: Model.pollRelease(root)
   // Shortening the interval applies now, not after the old period
   // finishes (the gate keeps an early restart from double-fetching).
-  onIntervalMinChanged: if (root.pollLeader) poll.restart()
+  onIntervalMinChanged: if (root.pollLeader) root.scheduleNextPoll(root.nextPollDelayMs())
+
+  // ---- local cache and poll scheduling
+  //
+  // A shell reload starts a new engine with empty Model.pollState. The disk
+  // cache carries the last successful response across that boundary: paint
+  // it immediately, then wait out whatever remains of the configured
+  // interval instead of calling CoinGecko on every reload.
+  function loadCache(raw) {
+    var cached = Model.parseCache(raw, Date.now())
+    if (!cached) return
+    if (root.cacheFetchedAt >= cached.fetchedAt) return
+    root.lastMap = cached.map
+    root.cacheFetchedAt = cached.fetchedAt
+    root.marketRows = Model.orderRows(cached.map, root.trackedCoins)
+    root.lastUpdated = new Date(cached.fetchedAt)
+    root.fetchError = ""
+    root.initialFetch = !root.primaryRow
+    Model.seedPollCache(cached.fetchedAt)
+  }
+
+  // Whether the latest map has a row for every tracked coin. Removing coins
+  // or re-injecting the same settings after a reload is fully covered; a
+  // newly added coin is not, so that change still checks immediately.
+  function cacheCovers(coins) {
+    if (!root.lastMap) return false
+    var wanted = Model.coinList(coins)
+    if (wanted.length === 0) return true
+    for (var i = 0; i < wanted.length; i++)
+      if (!root.lastMap[wanted[i]]) return false
+    return true
+  }
+
+  function nextPollDelayMs() {
+    var intervalMs = root.intervalMin * 60 * 1000
+    var last = Model.pollState.lastSuccessMs
+    if (last > 0) return Math.max(0, last + intervalMs - Date.now())
+    return 0
+  }
+
+  function scheduleNextPoll(delayMs) {
+    if (!root.pollLeader) return
+    poll.interval = Math.max(1, Math.round(Number(delayMs) || 0))
+    poll.restart()
+  }
+
+  function startPolling() {
+    // Both are set a beat after construction (settings by the host, cache by
+    // FileView); retry on the next turn rather than reading defaults.
+    if (!root.cacheLoadAttempted || !root.settingsReady) {
+      Qt.callLater(root.startPolling)
+      return
+    }
+    var delay = root.nextPollDelayMs()
+    // A fresh cache that covers the tracked list waits out the interval; a
+    // missing, stale, or partial one checks now.
+    if (!root.cacheCovers(root.trackedCoins)) delay = 0
+    root.scheduleNextPoll(delay)
+  }
 
   // What the bar paints: symbol, price, and a direction glyph. Moves within
   // the flat band (|24h| < flatThresholdPct, default ±0.5%) count as no
@@ -234,7 +336,18 @@ BarWidget {
     if (next) root.updateSetting("primary", next)
   }
 
-  onTrackedCoinsChanged: if (startupDone) Qt.callLater(refresh)
+  onTrackedCoinsChanged: {
+    if (!startupDone) return
+    // A coin-list change the cache already covers (a removal, or the same
+    // settings re-injected after a reload) needs no network call; just
+    // re-arm the timer around the cached check time. A new coin is not
+    // covered, so it still checks immediately.
+    if (root.cacheCovers(root.trackedCoins)) {
+      root.scheduleNextPoll(root.nextPollDelayMs())
+      return
+    }
+    Qt.callLater(refresh)
+  }
 
   // Stay clickable even with no data yet (initial fetch in flight, error
   // state, or every coin removed) so the panel — the only way back to a
@@ -261,6 +374,7 @@ BarWidget {
     onTriggered: {
       var wasLeader = root.pollLeader
       root.pollLeader = Model.pollClaim(root, Date.now())
+      if (root.pollLeader && !wasLeader) root.startPolling()
       if (root.pollLeader || wasLeader) return
       var shared = Model.pollConsume(root)
       if (shared && shared.seq > root.consumedSeq) {
@@ -273,12 +387,15 @@ BarWidget {
     }
   }
 
+  // One-shot, re-armed by scheduleNextPoll() after each result and whenever
+  // leadership moves. A one-shot timer lets a cache hit wait out the rest of
+  // the interval instead of firing a fixed cadence from process start.
   Timer {
     id: poll
-    interval: root.intervalMin * 60 * 1000
-    repeat: true
+    interval: Math.max(60000, root.intervalMin * 60 * 1000)
+    repeat: false
     running: root.pollLeader
-    triggeredOnStart: true
+    triggeredOnStart: false
     onTriggered: root.marketsFetch()
   }
 
@@ -370,6 +487,12 @@ BarWidget {
         root.fetchError = ""
         root.marketRows = Model.orderRows(map, root.trackedCoins)
         root.lastUpdated = new Date()
+        root.lastMap = map
+        root.cacheFetchedAt = root.lastUpdated.getTime()
+        Model.seedPollCache(root.cacheFetchedAt)
+        // Store the raw body, not the parsed rows: a reload reparses it with
+        // the same bounds and sanitizing as a live response.
+        cacheFile.setText(Model.serializeCache(stdoutText, root.cacheFetchedAt))
       } else if (lastExitCode === 0 && stdoutText.length >= Model.RESPONSE_MAX_BYTES) {
         // Exit 0 with a body at the cap: the document was truncated
         // mid-stream (narrow pipe/timing window — over-cap streams
@@ -391,6 +514,10 @@ BarWidget {
         retryTimer.interval = Model.retryBackoffMs(root.fetchRetries)
         retryTimer.restart()
       }
+      // Re-arm the one-shot poll: success waits the configured interval from
+      // its own timestamp; failure waits it from now, leaving the shorter
+      // retry ladder to retryTimer.
+      if (root.pollLeader) root.scheduleNextPoll(root.intervalMin * 60 * 1000)
       stdoutText = ""
       stderrText = ""
       if (root.fetchQueued) {
@@ -417,6 +544,29 @@ BarWidget {
       waitForEnd: true
       onStreamFinished: marketsProc.stderrText = text
     }
+  }
+
+  // Disk cache of the last successful markets response. Read synchronously
+  // at startup (blockLoading), so the bar can paint a cached price before the
+  // first frame; a reload then waits out the rest of the interval instead of
+  // polling CoinGecko again. Writes are atomic and only happen on success.
+  FileView {
+    id: cacheFile
+    path: root.cachePath
+    blockLoading: true
+    watchChanges: false
+    atomicWrites: true
+    printErrors: false
+    onLoaded: if (root.startupDone) root.loadCache(text())
+    onLoadFailed: if (root.startupDone) root.loadCache("")
+  }
+
+  // FileView's writer needs the parent directory to exist. `mkdir -p` is
+  // idempotent and finishes long before the first fetch can succeed.
+  Process {
+    id: cacheDirProc
+    command: ["mkdir", "-p", root.cacheDir]
+    running: true
   }
 
   // The panel tree (Canvas, search process, key catcher) is heavy and a
